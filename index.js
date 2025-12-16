@@ -83,56 +83,6 @@ async function run() {
       res.send(result);
     });
 
-    // update issue by user (only if pending & owner)
-    app.patch("/issues/:id", async (req, res) => {
-      const id = req.params.id;
-      const { email } = req.query; // user email from frontend
-      const updatedData = req.body;
-
-      // 1️⃣ Find the issue
-      const issue = await issuesCollection.findOne({
-        _id: new ObjectId(id),
-      });
-
-      if (!issue) {
-        return res.status(404).send({ message: "Issue not found" });
-      }
-
-      // 2️⃣ Check ownership
-      if (issue.email !== email) {
-        return res.status(403).send({ message: "Unauthorized" });
-      }
-
-      // 3️⃣ Prevent editing approved issues
-      if (issue.status === "approved") {
-        return res
-          .status(400)
-          .send({ message: "Approved issues cannot be edited" });
-      }
-
-      // 4️⃣ Update issue
-      const result = await issuesCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            issueName: updatedData.issueName,
-            description: updatedData.description,
-            category: updatedData.category,
-            priority: updatedData.priority,
-            division: updatedData.division,
-            district: updatedData.district,
-            upazila: updatedData.upazila,
-            address: updatedData.address,
-            issueImageURL: updatedData.issueImageURL,
-            phoneNumber: updatedData.phoneNumber,
-            updatedAt: new Date(),
-          },
-        }
-      );
-
-      res.send(result);
-    });
-
     // pending issue approved by admin
     app.patch("/issues/approve/:id", async (req, res) => {
       const id = req.params.id;
@@ -190,4 +140,3 @@ app.get("/", (req, res) => {
 app.listen(port, () => {
   console.log(`Example app listening on port ${port}`);
 });
-
