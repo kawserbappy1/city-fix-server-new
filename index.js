@@ -50,6 +50,8 @@ async function run() {
 
     const db = client.db("city-fix");
     const issuesCollection = db.collection("issues");
+    const usersCollection = db.collection("users");
+    const staffsCollection = db.collection("staffs");
 
     // issue related api
 
@@ -107,7 +109,7 @@ async function run() {
       res.send(result);
     });
 
-    // get details issu
+    // get details issue
     app.get("/approve-issues/:id", async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
