@@ -191,6 +191,8 @@ async function run() {
     });
 
     //############################################### staff related api ###############################################
+
+    // post staff
     app.post("/staff", async (req, res) => {
       const staffData = req.body;
       const updatedStaffData = {
@@ -207,6 +209,12 @@ async function run() {
         return res.status(409).send({ message: "Staff already exists" });
       }
       const result = await staffsCollection.insertOne(updatedStaffData);
+      res.send(result);
+    });
+
+    // get staff to ui
+    app.get("/staff", async (req, res) => {
+      const result = await staffsCollection.find().toArray();
       res.send(result);
     });
 
