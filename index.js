@@ -218,6 +218,28 @@ async function run() {
       res.send(result);
     });
 
+    // Approved staffs by admin api
+    app.patch("/staff-approve/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await staffsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            status: "approved",
+            approvedAt: new Date().toISOString(),
+          },
+        }
+      );
+      res.send(result);
+    });
+    //  delete staff by admin api
+    app.delete("/staff/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await staffsCollection.deleteOne(query);
+      res.send(result);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
