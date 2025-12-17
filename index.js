@@ -125,7 +125,6 @@ async function run() {
     });
 
     //############################################### user related api ###############################################
-
     // post user
     app.post("/user", async (req, res) => {
       const userData = req.body;
@@ -157,7 +156,6 @@ async function run() {
       try {
         const email = req.params.email;
         const updatedData = req.body;
-
         const result = await usersCollection.updateOne(
           { email: email },
           {
@@ -165,11 +163,9 @@ async function run() {
             $currentDate: { updatedAt: true },
           }
         );
-
         if (result.matchedCount === 0) {
           return res.status(404).send({ error: "User not found" });
         }
-
         res.send({
           success: true,
           message: "User updated successfully",
@@ -180,6 +176,13 @@ async function run() {
         res.status(500).send({ error: "Internal server error" });
       }
     });
+
+    // get all users by Admin
+    app.get("/user", async (req, res) => {
+      const result = await usersCollection.find().toArray();
+      res.send(result);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
