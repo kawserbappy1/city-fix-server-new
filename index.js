@@ -53,7 +53,7 @@ async function run() {
     const usersCollection = db.collection("users");
     const staffsCollection = db.collection("staffs");
 
-    // issue related api
+    //############################################### issue related api ###############################################
 
     // post issue by user
     app.post("/issues", async (req, res) => {
@@ -124,6 +124,17 @@ async function run() {
       res.send(result);
     });
 
+    //############################################### user related api ###############################################
+    app.post("/user", async (req, res) => {
+      const userData = req.body;
+      const updateData = {
+        ...userData,
+        role: "user",
+        isPremium: "free",
+      };
+      const result = await usersCollection.insertOne(updateData);
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
