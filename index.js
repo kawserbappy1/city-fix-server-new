@@ -127,11 +127,27 @@ async function run() {
     //############################################### user related api ###############################################
     app.post("/user", async (req, res) => {
       const userData = req.body;
+
       const updateData = {
         ...userData,
         role: "user",
         isPremium: "free",
+        createdAt: new Date().toISOString(),
+        last_logged_in: new Date().toISOString(),
       };
+      const query = {
+        email: userData.email,
+      };
+
+      const alredyExistsUser = await usersCollection.findOne(query);
+      if (alredyExistsUser) {
+        const result = await usersCollection.updateOne(query, {
+          $set: {
+            last_logged_in: new Date().toISOString(),
+          },
+        });
+        return res.send(result);
+      }
       const result = await usersCollection.insertOne(updateData);
       res.send(result);
     });
