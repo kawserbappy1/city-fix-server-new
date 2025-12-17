@@ -190,6 +190,26 @@ async function run() {
       res.send(result);
     });
 
+    //############################################### staff related api ###############################################
+    app.post("/staff", async (req, res) => {
+      const staffData = req.body;
+      const updatedStaffData = {
+        ...staffData,
+        status: "pending",
+        appliedAt: new Date().toISOString(),
+      };
+
+      const quer = {
+        email: staffData.email,
+      };
+      const alreadyExistsStaff = await staffsCollection.findOne(quer);
+      if (alreadyExistsStaff) {
+        return res.status(409).send({ message: "Staff already exists" });
+      }
+      const result = await staffsCollection.insertOne(updatedStaffData);
+      res.send(result);
+    });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
