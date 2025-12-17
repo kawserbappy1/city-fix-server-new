@@ -125,9 +125,10 @@ async function run() {
     });
 
     //############################################### user related api ###############################################
+
+    // post user
     app.post("/user", async (req, res) => {
       const userData = req.body;
-
       const updateData = {
         ...userData,
         role: "user",
@@ -138,7 +139,6 @@ async function run() {
       const query = {
         email: userData.email,
       };
-
       const alredyExistsUser = await usersCollection.findOne(query);
       if (alredyExistsUser) {
         const result = await usersCollection.updateOne(query, {
@@ -150,6 +150,35 @@ async function run() {
       }
       const result = await usersCollection.insertOne(updateData);
       res.send(result);
+    });
+
+    // update user
+    app.patch("/users/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const updatedData = req.body;
+
+        const result = await usersCollection.updateOne(
+          { email: email },
+          {
+            $set: updatedData,
+            $currentDate: { updatedAt: true },
+          }
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({ error: "User not found" });
+        }
+
+        res.send({
+          success: true,
+          message: "User updated successfully",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        console.error("Error updating user:", error);
+        res.status(500).send({ error: "Internal server error" });
+      }
     });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
