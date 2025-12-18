@@ -248,6 +248,7 @@ async function run() {
       const result = await staffsCollection.deleteOne(query);
       res.send(result);
     });
+
     // show single staff by staff profile
     app.get("/staff/:email", async (req, res) => {
       const email = req.params.email;
@@ -255,6 +256,22 @@ async function run() {
       if (!result) {
         return res.status(404).send({ message: "Staff not found" });
       }
+      res.send(result);
+    });
+
+    // update staff info by staff
+    app.patch("/staff/:id", async (req, res) => {
+      const id = req.params.id;
+      const updatedInfo = req.body;
+      const result = await staffsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            ...updatedInfo,
+            updatedAt: new Date().toISOString(),
+          },
+        }
+      );
       res.send(result);
     });
     // Send a ping to confirm a successful connection
