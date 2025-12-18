@@ -212,7 +212,7 @@ async function run() {
       res.send(result);
     });
 
-    // get staff to ui
+    // get all staff to ui
     app.get("/staff", async (req, res) => {
       const result = await staffsCollection.find().toArray();
       res.send(result);
@@ -221,6 +221,7 @@ async function run() {
     // Approved staffs by admin api
     app.patch("/staff-approve/:id", async (req, res) => {
       const id = req.params.id;
+      const staff = await staffsCollection.findOne({ _id: new ObjectId(id) });
       const result = await staffsCollection.updateOne(
         { _id: new ObjectId(id) },
         {
@@ -230,6 +231,14 @@ async function run() {
           },
         }
       );
+
+      const userUpdateResult = await usersCollection.updateOne(
+        { email: staff.email },
+        {
+          $set: { role: "staff" },
+        }
+      );
+
       res.send(result);
     });
     //  delete staff by admin api
@@ -239,7 +248,15 @@ async function run() {
       const result = await staffsCollection.deleteOne(query);
       res.send(result);
     });
-
+    // show single staff by staff profile
+    app.get("/staff/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await staffsCollection.findOne({ email });
+      if (!result) {
+        return res.status(404).send({ message: "Staff not found" });
+      }
+      res.send(result);
+    });
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
