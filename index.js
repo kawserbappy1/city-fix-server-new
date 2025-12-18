@@ -57,16 +57,47 @@ async function run() {
 
     // post issue by user
     app.post("/issues", async (req, res) => {
-      const issues = req.body;
-      const updateIssue = {
-        ...issues,
-        status: "pending",
-        workflow: "in queue",
-        assign: "waiting",
-        createdAt: new Date(),
-      };
-      const result = await issuesCollection.insertOne(updateIssue);
-      res.send(result);
+      try {
+        const issue = req.body;
+        const email = issue.email;
+
+        const user = await usersCollection.findOne({ email });
+
+        const limits = {
+          free: 5,
+          standard: 50,
+          premium: null,
+        };
+
+        const limit = limits[user.membership];
+
+        // ❌ Block if limit reached
+        if (limit !== null && user.postCount >= limit) {
+          return res.status(403).send({
+            message: "Post limit reached. Upgrade your plan.",
+          });
+        }
+
+        // ✅ Insert issue
+        const result = await issuesCollection.insertOne({
+          ...issue,
+          status: "pending",
+          workflow: "in queue",
+          assign: "waiting",
+          createdAt: new Date(),
+        });
+
+        // ✅ Increment postCount
+        await usersCollection.updateOne({ email }, { $inc: { postCount: 1 } });
+
+        res.send({
+          success: true,
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
+      }
     });
 
     // get all issues by admin and get personal issue by email
@@ -86,6 +117,69 @@ async function run() {
       res.send(result);
     });
 
+    // show admin approve post in the ui
+    app.get("/approve-issues", async (req, res) => {
+      const query = { status: "approved" };
+      const result = await issuesCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // get details issue
+    app.get("/approve-issues/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await issuesCollection.findOne(query);
+      res.send(result);
+    });
+
+    // get for single  details
+    app.get("/issues/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const issue = await issuesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!issue) {
+          return res.status(404).send({ message: "Issue not found" });
+        }
+
+        res.send(issue);
+      } catch (error) {
+        console.error("Error fetching issue:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // update issu before pending
+    app.patch("/issue-edit/:id", async (req, res) => {
+      const updateData = req.body;
+
+      try {
+        const id = req.params.id;
+        const issue = await issuesCollection.findOne({
+          _id: new ObjectId(id),
+        });
+        if (!issue) {
+          return res.status(404).send({ message: "Issue not found" });
+        }
+        if (issue.status === "approved") {
+          return res
+            .status(400)
+            .send({ message: "You cannot edit an approved issue" });
+        }
+        const result = await issuesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+        res.send({ success: true, modifiedCount: result.modifiedCount });
+      } catch (error) {
+        console.error("Error editing issue:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
     // pending issue approved by admin
     app.patch("/issues/approve/:id", async (req, res) => {
       const id = req.params.id;
@@ -103,20 +197,6 @@ async function run() {
       res.send(result);
     });
 
-    // show admin approve post in the ui
-    app.get("/approve-issues", async (req, res) => {
-      const query = { status: "approved" };
-      const result = await issuesCollection.find(query).toArray();
-      res.send(result);
-    });
-
-    // get details issue
-    app.get("/approve-issues/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await issuesCollection.findOne(query);
-      res.send(result);
-    });
     // delete issues by admin
     app.delete("/issues/:id", async (req, res) => {
       const id = req.params.id;
@@ -174,42 +254,68 @@ async function run() {
 
     //############################################### user related api ###############################################
 
-    // get user role api
+    // get user role api for hook
     app.get("/user/role/:email", async (req, res) => {
       const email = req.params.email;
       const result = await usersCollection.findOne({ email });
       res.send({ role: result?.role });
     });
-
-    app.get("/user/membership/:email", async (req, res) => {
+    // get membership info hook
+    app.get("/users/usage/:email", async (req, res) => {
       const email = req.params.email;
-      const result = await usersCollection.findOne({ email });
-      res.send({ membership: result?.isPremium });
+      const user = await usersCollection.findOne({ email });
+
+      const limits = {
+        free: 5,
+        standard: 50,
+        premium: null,
+      };
+      const limit = limits[user.membership];
+      res.send({
+        membership: user.membership,
+        postCount: user.postCount || 0,
+        limit,
+        remaining: limit === null ? "unlimited" : limit - (user.postCount || 0),
+      });
     });
-    // post user
+
+    // create or update user
     app.post("/user", async (req, res) => {
-      const userData = req.body;
-      const updateData = {
-        ...userData,
-        role: "user",
-        isPremium: "free",
-        createdAt: new Date().toISOString(),
-        last_logged_in: new Date().toISOString(),
-      };
-      const query = {
-        email: userData.email,
-      };
-      const alredyExistsUser = await usersCollection.findOne(query);
-      if (alredyExistsUser) {
-        const result = await usersCollection.updateOne(query, {
-          $set: {
-            last_logged_in: new Date().toISOString(),
-          },
+      try {
+        const userData = req.body;
+        const query = { email: userData.email };
+        const existingUser = await usersCollection.findOne(query);
+        // If user already exists → update last login
+        if (existingUser) {
+          await usersCollection.updateOne(query, {
+            $set: {
+              last_logged_in: new Date().toISOString(),
+            },
+          });
+          return res.send({
+            success: true,
+            message: "User already exists. Login time updated.",
+          });
+        }
+        // New user
+        const newUser = {
+          ...userData,
+          role: "user",
+          membership: "free",
+          postCount: 0,
+          createdAt: new Date().toISOString(),
+          last_logged_in: new Date().toISOString(),
+        };
+        const result = await usersCollection.insertOne(newUser);
+        res.send({
+          success: true,
+          insertedId: result.insertedId,
+          message: "User created successfully",
         });
-        return res.send(result);
+      } catch (error) {
+        console.error("User create error:", error);
+        res.status(500).send({ message: "Internal server error" });
       }
-      const result = await usersCollection.insertOne(updateData);
-      res.send(result);
     });
 
     // update user
