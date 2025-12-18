@@ -175,10 +175,16 @@ async function run() {
     //############################################### user related api ###############################################
 
     // get user role api
-    app.get("user/role/:email", async (req, res) => {
+    app.get("/user/role/:email", async (req, res) => {
       const email = req.params.email;
       const result = await usersCollection.findOne({ email });
       res.send({ role: result?.role });
+    });
+
+    app.get("/user/membership/:email", async (req, res) => {
+      const email = req.params.email;
+      const result = await usersCollection.findOne({ email });
+      res.send({ membership: result?.isPremium });
     });
     // post user
     app.post("/user", async (req, res) => {
