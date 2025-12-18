@@ -488,6 +488,34 @@ async function run() {
         res.status(500).send({ message: "Server error" });
       }
     });
+    // accept issue to staff change workflow to working
+    app.patch("/accept-issu/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await issuesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            workflow: "Working",
+            acceptAt: new Date(),
+          },
+        }
+      );
+      res.send(result);
+    });
+    // complete issue to staff change workflow to resolved
+    app.patch("/resolved-issu/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await issuesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            workflow: "resolved",
+            resolvedAt: new Date(),
+          },
+        }
+      );
+      res.send(result);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
