@@ -203,6 +203,14 @@ async function run() {
       res.send(result);
     });
 
+    // delete issues before approved by admin
+    app.delete("/issue-delete/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await issuesCollection.deleteOne(query);
+      res.send(result);
+    });
+
     // Assign staff to issue by admin
     app.patch("/issues/assign/:issueId", async (req, res) => {
       try {
@@ -344,7 +352,10 @@ async function run() {
 
     // get all users by Admin
     app.get("/user", async (req, res) => {
-      const result = await usersCollection.find().toArray();
+      const result = await usersCollection
+        .find()
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(result);
     });
     // delete user by Admin
@@ -460,6 +471,21 @@ async function run() {
       } catch (error) {
         console.error("Update staff error:", error);
         res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+    // Get all issues assigned to a staff
+    app.get("/issues/assigned/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+        const issues = await issuesCollection
+          .find({ "assignedStaff.email": email })
+          .toArray();
+
+        res.send(issues);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
       }
     });
 
