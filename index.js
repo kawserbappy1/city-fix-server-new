@@ -60,25 +60,20 @@ async function run() {
       try {
         const issue = req.body;
         const email = issue.email;
-
         const user = await usersCollection.findOne({ email });
-
         const limits = {
           free: 5,
           standard: 50,
           premium: null,
         };
-
         const limit = limits[user.membership];
-
-        // ❌ Block if limit reached
+        //  Block if limit reached
         if (limit !== null && user.postCount >= limit) {
           return res.status(403).send({
             message: "Post limit reached. Upgrade your plan.",
           });
         }
-
-        // ✅ Insert issue
+        //  Insert issue
         const result = await issuesCollection.insertOne({
           ...issue,
           status: "pending",
@@ -86,10 +81,8 @@ async function run() {
           assign: "waiting",
           createdAt: new Date(),
         });
-
-        // ✅ Increment postCount
+        //  Increment postCount
         await usersCollection.updateOne({ email }, { $inc: { postCount: 1 } });
-
         res.send({
           success: true,
           insertedId: result.insertedId,
@@ -104,11 +97,9 @@ async function run() {
     app.get("/issues", async (req, res) => {
       const query = {};
       const { email } = req.query;
-
       if (email) {
         query.email = email;
       }
-
       const result = await issuesCollection
         .find(query)
         .sort({ createdAt: -1 })
@@ -116,14 +107,12 @@ async function run() {
 
       res.send(result);
     });
-
     // show admin approve post in the ui
     app.get("/approve-issues", async (req, res) => {
       const query = { status: "approved" };
       const result = await issuesCollection.find(query).toArray();
       res.send(result);
     });
-
     // get details issue
     app.get("/approve-issues/:id", async (req, res) => {
       const id = req.params.id;
@@ -131,20 +120,16 @@ async function run() {
       const result = await issuesCollection.findOne(query);
       res.send(result);
     });
-
     // get for single  details
     app.get("/issues/:id", async (req, res) => {
       try {
         const { id } = req.params;
-
         const issue = await issuesCollection.findOne({
           _id: new ObjectId(id),
         });
-
         if (!issue) {
           return res.status(404).send({ message: "Issue not found" });
         }
-
         res.send(issue);
       } catch (error) {
         console.error("Error fetching issue:", error);
@@ -179,7 +164,6 @@ async function run() {
         res.status(500).send({ message: "Internal server error" });
       }
     });
-
     // pending issue approved by admin
     app.patch("/issues/approve/:id", async (req, res) => {
       const id = req.params.id;
@@ -190,7 +174,21 @@ async function run() {
             status: "approved",
             workflow: "in-progress",
             approvedAt: new Date(),
-            // approvedBy: req.user.email,
+          },
+        }
+      );
+      res.send(result);
+    });
+    // pending issue Reject by admin
+    app.patch("/issues/reject/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await issuesCollection.updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            status: "rejected",
+            workflow: "rejected",
+            rejectedAt: new Date(),
           },
         }
       );
