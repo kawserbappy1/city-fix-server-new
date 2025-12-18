@@ -62,6 +62,7 @@ async function run() {
         ...issues,
         status: "pending",
         workflow: "in queue",
+        assign: "waiting",
         createdAt: new Date(),
       };
       const result = await issuesCollection.insertOne(updateIssue);
@@ -122,6 +123,53 @@ async function run() {
       const query = { _id: new ObjectId(id) };
       const result = await issuesCollection.deleteOne(query);
       res.send(result);
+    });
+
+    // Assign staff to issue by admin
+    app.patch("/issues/assign/:issueId", async (req, res) => {
+      try {
+        const { issueId } = req.params;
+        const { staffId } = req.body;
+
+        if (!staffId) {
+          return res.status(400).send({ message: "staffId is required" });
+        }
+
+        // 1️⃣ Check staff
+        const staff = await staffsCollection.findOne({
+          _id: new ObjectId(staffId),
+          status: "approved",
+          availability: { $ne: "not_available" },
+        });
+
+        if (!staff) {
+          return res.status(404).send({ message: "Staff not available" });
+        }
+
+        // 2️⃣ Update issue
+        const result = await issuesCollection.updateOne(
+          { _id: new ObjectId(issueId) },
+          {
+            $set: {
+              assignedStaff: {
+                staffId: staff._id,
+                name: staff.name,
+                email: staff.email,
+                phone: staff.phone,
+                photo: staff.staffPhoto,
+                assignedAt: new Date().toISOString(),
+              },
+              workflow: "in-progress",
+              assign: "assigned",
+            },
+          }
+        );
+
+        res.send({ success: true, result });
+      } catch (error) {
+        console.error("Assign staff error:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     });
 
     //############################################### user related api ###############################################
@@ -212,12 +260,24 @@ async function run() {
       res.send(result);
     });
 
-    // get all staff to ui
+    // get all staff to ui for admin
     app.get("/staff", async (req, res) => {
-      const result = await staffsCollection.find().toArray();
+      const result = await staffsCollection
+        .find()
+        .sort({ appliedAt: -1 })
+        .toArray();
       res.send(result);
     });
 
+    // get only approve staff for ui or assign
+    app.get("/approve-staff", async (req, res) => {
+      const query = {
+        status: "approved",
+        availability: { $ne: "not_available" },
+      };
+      const result = await staffsCollection.find(query).toArray();
+      res.send(result);
+    });
     // Approved staffs by admin api
     app.patch("/staff-approve/:id", async (req, res) => {
       const id = req.params.id;
@@ -261,19 +321,31 @@ async function run() {
 
     // update staff info by staff
     app.patch("/staff/:id", async (req, res) => {
-      const id = req.params.id;
-      const updatedInfo = req.body;
-      const result = await staffsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            ...updatedInfo,
-            updatedAt: new Date().toISOString(),
-          },
+      try {
+        const id = req.params.id;
+        const updatedInfo = req.body;
+
+        if (!updatedInfo) {
+          return res.status(400).send({ message: "No update data provided" });
         }
-      );
-      res.send(result);
+
+        const result = await staffsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              ...updatedInfo,
+              updatedAt: new Date().toISOString(),
+            },
+          }
+        );
+
+        res.send(result);
+      } catch (error) {
+        console.error("Update staff error:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
     });
+
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
