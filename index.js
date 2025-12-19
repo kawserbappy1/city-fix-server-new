@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
+const crypto = require("crypto");
 const admin = require("firebase-admin");
 const app = express();
 const port = process.env.PORT || 3000;
@@ -40,6 +41,14 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   },
 });
+// generate tracking id
+const generateTrackingId = () => {
+  const prefix = "cifx"; //your brand prefix
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, ""); //YYYYMMDD
+  const random = crypto.randomBytes(3).toString("hex").toUpperCase(); //6 char random rex
+
+  return `${prefix}-${date}-${random}`;
+};
 
 async function run() {
   try {
@@ -52,6 +61,7 @@ async function run() {
     const issuesCollection = db.collection("issues");
     const usersCollection = db.collection("users");
     const staffsCollection = db.collection("staffs");
+    const notificationCollection = db.collection("notification");
 
     //############################################### issue related api ###############################################
 
@@ -83,6 +93,7 @@ async function run() {
         });
         //  Increment postCount
         await usersCollection.updateOne({ email }, { $inc: { postCount: 1 } });
+
         res.send({
           success: true,
           insertedId: result.insertedId,
@@ -104,13 +115,13 @@ async function run() {
         .find(query)
         .sort({ createdAt: -1 })
         .toArray();
-
       res.send(result);
     });
     // show admin approve post in the ui
     app.get("/approve-issues", async (req, res) => {
       const query = { status: "approved" };
       const result = await issuesCollection.find(query).toArray();
+
       res.send(result);
     });
     // get details issue
@@ -167,12 +178,14 @@ async function run() {
     // pending issue approved by admin
     app.patch("/issues/approve/:id", async (req, res) => {
       const id = req.params.id;
+      const trackingId = generateTrackingId();
       const result = await issuesCollection.updateOne(
         { _id: new ObjectId(id) },
         {
           $set: {
             status: "approved",
             workflow: "in-progress",
+            trackingId: trackingId,
             approvedAt: new Date(),
           },
         }
@@ -365,7 +378,27 @@ async function run() {
       const result = await usersCollection.deleteOne(query);
       res.send(result);
     });
-
+    // api for tracking id by user
+    app.get("/track-issue", async (req, res) => {
+      try {
+        const { email } = req.query;
+        if (!email) {
+          return res.status(400).send({ message: "Email is required" });
+        }
+        const query = {
+          email: email,
+          status: "approved", // ✅ only approved issues
+        };
+        const result = await issuesCollection
+          .find(query)
+          .sort({ approvedAt: -1 }) // better than createdAt
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
+      }
+    });
     //############################################### staff related api ###############################################
 
     // post staff
