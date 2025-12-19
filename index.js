@@ -61,12 +61,20 @@ async function run() {
     const issuesCollection = db.collection("issues");
     const usersCollection = db.collection("users");
     const staffsCollection = db.collection("staffs");
-    const notificationCollection = db.collection("notification");
+
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded_email;
+      const user = await usersCollection.findOne({ email });
+      if (user?.role !== "admin") {
+        return res.status(403).send({ message: "Admin access required" });
+      }
+      next();
+    };
 
     //############################################### issue related api ###############################################
 
     // post issue by user
-    app.post("/issues", async (req, res) => {
+    app.post("/issues", verifyFBToken, async (req, res) => {
       try {
         const issue = req.body;
         const email = issue.email;
@@ -105,7 +113,7 @@ async function run() {
     });
 
     // get all issues by admin and get personal issue by email
-    app.get("/issues", async (req, res) => {
+    app.get("/issues", verifyFBToken, async (req, res) => {
       const query = {};
       const { email } = req.query;
       if (email) {
@@ -132,7 +140,7 @@ async function run() {
       res.send(result);
     });
     // get for single  details
-    app.get("/issues/:id", async (req, res) => {
+    app.get("/issues/:id", verifyFBToken, async (req, res) => {
       try {
         const { id } = req.params;
         const issue = await issuesCollection.findOne({
@@ -149,7 +157,7 @@ async function run() {
     });
 
     // update issu before pending
-    app.patch("/issue-edit/:id", async (req, res) => {
+    app.patch("/issue-edit/:id", verifyFBToken, async (req, res) => {
       const updateData = req.body;
 
       try {
@@ -176,40 +184,54 @@ async function run() {
       }
     });
     // pending issue approved by admin
-    app.patch("/issues/approve/:id", async (req, res) => {
-      const id = req.params.id;
-      const trackingId = generateTrackingId();
-      const result = await issuesCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            status: "approved",
-            workflow: "in-progress",
-            trackingId: trackingId,
-            approvedAt: new Date(),
-          },
-        }
-      );
-      res.send(result);
-    });
+    app.patch(
+      "/issues/approve/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const trackingId = generateTrackingId();
+        const result = await issuesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "approved",
+              workflow: "in-progress",
+              trackingId: trackingId,
+              approvedAt: new Date(),
+            },
+            $setOnInsert: {
+              upvotes: 0,
+              upvotedBy: [],
+            },
+          }
+        );
+        res.send(result);
+      }
+    );
     // pending issue Reject by admin
-    app.patch("/issues/reject/:id", async (req, res) => {
-      const id = req.params.id;
-      const result = await issuesCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            status: "rejected",
-            workflow: "rejected",
-            rejectedAt: new Date(),
-          },
-        }
-      );
-      res.send(result);
-    });
+    app.patch(
+      "/issues/reject/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const result = await issuesCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "rejected",
+              workflow: "rejected",
+              rejectedAt: new Date(),
+            },
+          }
+        );
+        res.send(result);
+      }
+    );
 
     // delete issues by admin
-    app.delete("/issues/:id", async (req, res) => {
+    app.delete("/issues/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await issuesCollection.deleteOne(query);
@@ -217,70 +239,143 @@ async function run() {
     });
 
     // delete issues before approved by admin
-    app.delete("/issue-delete/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await issuesCollection.deleteOne(query);
+    app.delete(
+      "/issue-delete/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await issuesCollection.deleteOne(query);
+        res.send(result);
+      }
+    );
+
+    // Assign staff to issue by admin
+    app.patch(
+      "/issues/assign/:issueId",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { issueId } = req.params;
+          const { staffId } = req.body;
+
+          if (!staffId) {
+            return res.status(400).send({ message: "staffId is required" });
+          }
+
+          // 1️ Check staff
+          const staff = await staffsCollection.findOne({
+            _id: new ObjectId(staffId),
+            status: "approved",
+            availability: { $ne: "not_available" },
+          });
+
+          if (!staff) {
+            return res.status(404).send({ message: "Staff not available" });
+          }
+
+          // 2️ Update issue
+          const result = await issuesCollection.updateOne(
+            { _id: new ObjectId(issueId) },
+            {
+              $set: {
+                assignedStaff: {
+                  staffId: staff._id,
+                  name: staff.name,
+                  email: staff.email,
+                  phone: staff.phone,
+                  photo: staff.staffPhoto,
+                  assignedAt: new Date().toISOString(),
+                },
+                workflow: "in-progress",
+                assign: "assigned",
+              },
+            }
+          );
+
+          res.send({ success: true, result });
+        } catch (error) {
+          console.error("Assign staff error:", error);
+          res.status(500).send({ message: "Internal server error" });
+        }
+      }
+    );
+
+    // resolve issue show in the home page
+    app.get("/resolved-issue", async (req, res) => {
+      const query = { workflow: "resolved" };
+      const result = await issuesCollection
+        .find(query)
+        .sort({ acceptAt: -1 })
+        .limit(6)
+        .toArray();
       res.send(result);
     });
 
-    // Assign staff to issue by admin
-    app.patch("/issues/assign/:issueId", async (req, res) => {
+    // upvote issue
+    app.patch("/issues/upvote/:id", verifyFBToken, async (req, res) => {
       try {
-        const { issueId } = req.params;
-        const { staffId } = req.body;
+        const issueId = req.params.id;
+        const userEmail = req.decoded_email; // logged-in user
 
-        if (!staffId) {
-          return res.status(400).send({ message: "staffId is required" });
-        }
-
-        // 1️⃣ Check staff
-        const staff = await staffsCollection.findOne({
-          _id: new ObjectId(staffId),
-          status: "approved",
-          availability: { $ne: "not_available" },
+        const issue = await issuesCollection.findOne({
+          _id: new ObjectId(issueId),
         });
 
-        if (!staff) {
-          return res.status(404).send({ message: "Staff not available" });
+        if (!issue) {
+          return res.status(404).send({ message: "Issue not found" });
         }
 
-        // 2️⃣ Update issue
-        const result = await issuesCollection.updateOne(
-          { _id: new ObjectId(issueId) },
-          {
-            $set: {
-              assignedStaff: {
-                staffId: staff._id,
-                name: staff.name,
-                email: staff.email,
-                phone: staff.phone,
-                photo: staff.staffPhoto,
-                assignedAt: new Date().toISOString(),
-              },
-              workflow: "in-progress",
-              assign: "assigned",
-            },
-          }
-        );
+        //  User cannot upvote own issue
+        if (issue.email === userEmail) {
+          return res
+            .status(403)
+            .send({ message: "You cannot upvote your own issue" });
+        }
 
-        res.send({ success: true, result });
+        const alreadyUpvoted = issue.upvotedBy?.includes(userEmail);
+
+        if (alreadyUpvoted) {
+          //  Remove upvote
+          await issuesCollection.updateOne(
+            { _id: new ObjectId(issueId) },
+            {
+              $inc: { upvotes: -1 },
+              $pull: { upvotedBy: userEmail },
+            }
+          );
+
+          return res.send({ upvoted: false });
+        } else {
+          //  Add upvote
+          await issuesCollection.updateOne(
+            { _id: new ObjectId(issueId) },
+            {
+              $inc: { upvotes: 1 },
+              $addToSet: { upvotedBy: userEmail },
+            }
+          );
+
+          return res.send({ upvoted: true });
+        }
       } catch (error) {
-        console.error("Assign staff error:", error);
-        res.status(500).send({ message: "Internal server error" });
+        console.error(error);
+        res.status(500).send({ message: "Server error" });
       }
     });
 
     //############################################### user related api ###############################################
 
     // get user role api for hook
-    app.get("/user/role/:email", async (req, res) => {
+    app.get("/user/role/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       const result = await usersCollection.findOne({ email });
       res.send({ role: result?.role });
     });
     // get membership info hook
-    app.get("/users/usage/:email", async (req, res) => {
+    app.get("/users/usage/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       const user = await usersCollection.findOne({ email });
 
@@ -338,7 +433,7 @@ async function run() {
     });
 
     // update user
-    app.patch("/users/:email", async (req, res) => {
+    app.patch("/users/:email", verifyFBToken, async (req, res) => {
       try {
         const email = req.params.email;
         const updatedData = req.body;
@@ -364,22 +459,24 @@ async function run() {
     });
 
     // get all users by Admin
-    app.get("/user", async (req, res) => {
+    app.get("/user", verifyFBToken, verifyAdmin, async (req, res) => {
       const result = await usersCollection
         .find()
         .sort({ createdAt: -1 })
         .toArray();
       res.send(result);
     });
+
     // delete user by Admin
-    app.delete("/user/:id", async (req, res) => {
+    app.delete("/user/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await usersCollection.deleteOne(query);
       res.send(result);
     });
+
     // api for tracking id by user
-    app.get("/track-issue", async (req, res) => {
+    app.get("/track-issue", verifyFBToken, async (req, res) => {
       try {
         const { email } = req.query;
         if (!email) {
@@ -387,7 +484,7 @@ async function run() {
         }
         const query = {
           email: email,
-          status: "approved", // ✅ only approved issues
+          status: "approved", //  only approved issues
         };
         const result = await issuesCollection
           .find(query)
@@ -399,10 +496,11 @@ async function run() {
         res.status(500).send({ message: "Server error" });
       }
     });
+
     //############################################### staff related api ###############################################
 
     // post staff
-    app.post("/staff", async (req, res) => {
+    app.post("/staff", verifyFBToken, async (req, res) => {
       const staffData = req.body;
       const updatedStaffData = {
         ...staffData,
@@ -422,7 +520,7 @@ async function run() {
     });
 
     // get all staff to ui for admin
-    app.get("/staff", async (req, res) => {
+    app.get("/staff", verifyFBToken, verifyAdmin, async (req, res) => {
       const result = await staffsCollection
         .find()
         .sort({ appliedAt: -1 })
@@ -431,7 +529,7 @@ async function run() {
     });
 
     // get only approve staff for ui or assign
-    app.get("/approve-staff", async (req, res) => {
+    app.get("/approve-staff", verifyFBToken, verifyAdmin, async (req, res) => {
       const query = {
         status: "approved",
         availability: { $ne: "not_available" },
@@ -440,30 +538,35 @@ async function run() {
       res.send(result);
     });
     // Approved staffs by admin api
-    app.patch("/staff-approve/:id", async (req, res) => {
-      const id = req.params.id;
-      const staff = await staffsCollection.findOne({ _id: new ObjectId(id) });
-      const result = await staffsCollection.updateOne(
-        { _id: new ObjectId(id) },
-        {
-          $set: {
-            status: "approved",
-            approvedAt: new Date().toISOString(),
-          },
-        }
-      );
+    app.patch(
+      "/staff-approve/:id",
+      verifyFBToken,
+      verifyAdmin,
+      async (req, res) => {
+        const id = req.params.id;
+        const staff = await staffsCollection.findOne({ _id: new ObjectId(id) });
+        const result = await staffsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status: "approved",
+              approvedAt: new Date().toISOString(),
+            },
+          }
+        );
 
-      const userUpdateResult = await usersCollection.updateOne(
-        { email: staff.email },
-        {
-          $set: { role: "staff" },
-        }
-      );
+        const userUpdateResult = await usersCollection.updateOne(
+          { email: staff.email },
+          {
+            $set: { role: "staff" },
+          }
+        );
 
-      res.send(result);
-    });
+        res.send(result);
+      }
+    );
     //  delete staff by admin api
-    app.delete("/staff/:id", async (req, res) => {
+    app.delete("/staff/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await staffsCollection.deleteOne(query);
@@ -471,7 +574,7 @@ async function run() {
     });
 
     // show single staff by staff profile
-    app.get("/staff/:email", async (req, res) => {
+    app.get("/staff/:email", verifyFBToken, async (req, res) => {
       const email = req.params.email;
       const result = await staffsCollection.findOne({ email });
       if (!result) {
@@ -481,7 +584,7 @@ async function run() {
     });
 
     // update staff info by staff
-    app.patch("/staff/:id", async (req, res) => {
+    app.patch("/staff/:id", verifyFBToken, async (req, res) => {
       try {
         const id = req.params.id;
         const updatedInfo = req.body;
@@ -508,7 +611,7 @@ async function run() {
     });
 
     // Get all issues assigned to a staff
-    app.get("/issues/assigned/:email", async (req, res) => {
+    app.get("/issues/assigned/:email", verifyFBToken, async (req, res) => {
       try {
         const { email } = req.params;
         const issues = await issuesCollection
@@ -522,7 +625,7 @@ async function run() {
       }
     });
     // accept issue to staff change workflow to working
-    app.patch("/accept-issu/:id", async (req, res) => {
+    app.patch("/accept-issu/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const result = await issuesCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -536,7 +639,7 @@ async function run() {
       res.send(result);
     });
     // complete issue to staff change workflow to resolved
-    app.patch("/resolved-issu/:id", async (req, res) => {
+    app.patch("/resolved-issu/:id", verifyFBToken, async (req, res) => {
       const id = req.params.id;
       const result = await issuesCollection.updateOne(
         { _id: new ObjectId(id) },
@@ -548,6 +651,29 @@ async function run() {
         }
       );
       res.send(result);
+    });
+
+    //############################################### Boost and paid related api ###############################################
+
+    app.get("/make-boost-issue", async (req, res) => {
+      try {
+        const { email } = req.query;
+        if (!email) {
+          return res.status(400).send({ message: "Email is not matches" });
+        }
+        const query = {
+          email: email,
+          status: "approved",
+        };
+        const result = await issuesCollection
+          .find(query)
+          .sort({ approvedAt: -1 })
+          .toArray();
+        res.send(result);
+      } catch (error) {
+        console.log(error);
+        res.status(500).send({ message: "server error" });
+      }
     });
 
     // Send a ping to confirm a successful connection
