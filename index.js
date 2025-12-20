@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
+const stripe = require("stripe")(process.env.STRIPE_SECREAT_KEY);
 const crypto = require("crypto");
 const admin = require("firebase-admin");
 const app = express();
@@ -673,6 +674,63 @@ async function run() {
       } catch (error) {
         console.log(error);
         res.status(500).send({ message: "server error" });
+      }
+    });
+    //############################################### Payment related api ###############################################
+    app.post(`/create-checkout-session`, async (req, res) => {
+      try {
+        const paymentInfo = req.body;
+
+        // Validate required fields
+        if (
+          !paymentInfo.issueId ||
+          !paymentInfo.email ||
+          !paymentInfo.issueName
+        ) {
+          return res.status(400).json({
+            message: "Missing required fields",
+          });
+        }
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          line_items: [
+            {
+              price_data: {
+                currency: "bdt",
+                unit_amount: 10000, // 100 Taka in paisa
+                product_data: {
+                  name: `Boost: ${paymentInfo.issueName}`,
+                  description: "Priority issue resolution service",
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          customer_email: paymentInfo.email,
+          mode: "payment",
+          metadata: {
+            issueId: paymentInfo.issueId,
+            email: paymentInfo.email,
+          },
+          success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.SITE_DOMAIN}/payment-cancelled`,
+        });
+
+        console.log("Stripe session created:", session.id);
+
+        // Return JSON with the checkout URL
+        res.status(200).json({
+          success: true,
+          url: session.url,
+          sessionId: session.id,
+        });
+      } catch (error) {
+        console.error("Stripe error:", error);
+        res.status(500).json({
+          success: false,
+          message: error.message,
+        });
       }
     });
 
