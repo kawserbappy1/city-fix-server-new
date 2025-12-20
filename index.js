@@ -62,6 +62,7 @@ async function run() {
     const issuesCollection = db.collection("issues");
     const usersCollection = db.collection("users");
     const staffsCollection = db.collection("staffs");
+    const paymentsCollection = db.collection("payments");
 
     const verifyAdmin = async (req, res, next) => {
       const email = req.decoded_email;
@@ -677,7 +678,7 @@ async function run() {
       }
     });
     //############################################### Payment related api ###############################################
-    app.post(`/create-checkout-session`, async (req, res) => {
+    app.post(`/create-checkout-session`, verifyFBToken, async (req, res) => {
       try {
         const paymentInfo = req.body;
 
@@ -712,12 +713,11 @@ async function run() {
           metadata: {
             issueId: paymentInfo.issueId,
             email: paymentInfo.email,
+            issueName: paymentInfo.issueName,
           },
           success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${process.env.SITE_DOMAIN}/payment-cancelled`,
         });
-
-        console.log("Stripe session created:", session.id);
 
         // Return JSON with the checkout URL
         res.status(200).json({
@@ -732,6 +732,69 @@ async function run() {
           message: error.message,
         });
       }
+    });
+
+    app.get("/payment-histroy", verifyFBToken, async (req, res) => {
+      const session_id = req.query.session_id;
+      const session = await stripe.checkout.sessions.retrieve(session_id);
+      const trasanctionId = session.payment_intent;
+      const query = { transitionId: trasanctionId };
+      const duplicatePayment = await paymentsCollection.findOne(query);
+      if (duplicatePayment) {
+        return res.send({ message: "already id existis", trasanctionId });
+      }
+      if (session.payment_status === "paid") {
+        const id = session.metadata.issueId;
+        const query = { _id: new ObjectId(id) };
+        const update = {
+          $set: {
+            boostStatus: "boost",
+            boostAt: new Date().toISOString(),
+          },
+        };
+        const result = await issuesCollection.updateOne(query, update);
+
+        const payment = {
+          amount: session.amount_total / 100,
+          customer_email: session.customer_email,
+          PaidStatus: session.payment_status,
+          paymentMethod: session.payment_method_types,
+          issueId: session.metadata.issueId,
+          issueName: session.metadata.issueName,
+          transitionId: session.payment_intent,
+          paidAt: new Date().toISOString(),
+        };
+
+        if (session.payment_status === "paid") {
+          const resultPayment = await paymentsCollection.insertOne(payment);
+          res.send({
+            success: true,
+            modifyIssue: result,
+            paymentInfo: resultPayment,
+          });
+        }
+        res.send(result);
+      }
+      res.send({
+        success: false,
+      });
+    });
+    // get invoice data by user
+    app.get("/invoice-data", verifyFBToken, async (req, res) => {
+      const email = req.decoded_email;
+      const invoices = await paymentsCollection
+        .find({ customer_email: email })
+        .sort({ paidAt: -1 })
+        .toArray();
+
+      res.send(invoices);
+    });
+
+    // get all manage order
+
+    app.get("/manage-payment", verifyFBToken, verifyAdmin, async (req, res) => {
+      const result = await paymentsCollection.find().toArray();
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
